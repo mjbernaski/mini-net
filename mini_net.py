@@ -2,6 +2,8 @@
 """mini-net: live network throughput on a single CLI progress bar."""
 
 import argparse
+import json
+import os
 import shutil
 import signal
 import subprocess
@@ -22,6 +24,18 @@ DIM = "\033[2m"
 
 BLOCK = "█"
 EMPTY = "─"
+
+
+def _default_groups():
+    """Fall back to the "groups" section of report.json (same config
+    mini_net_report.py uses) so the split view doesn't require -g every time."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report.json")
+    try:
+        with open(path) as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {label: list(ifaces) for label, ifaces in (cfg.get("groups") or {}).items()}
 
 
 def _keep(name, iface):
@@ -136,7 +150,8 @@ def main():
                    metavar="NAME=IFACE[,IFACE...]",
                    help="named interface group rendered as its own bar "
                         "(repeatable); e.g. -g eth=enP7s7 "
-                        "-g hb=enp1s0f0np0,enp1s0f1np1. Overrides --iface.")
+                        "-g hb=enp1s0f0np0,enp1s0f1np1. Overrides --iface. "
+                        "Default (no -g/-n): groups from report.json, if present.")
     args = p.parse_args()
 
     groups = {}
@@ -147,6 +162,9 @@ def main():
             sys.exit(f"mini-net: bad --group spec {spec!r}, "
                       "expected NAME=IFACE[,IFACE...]")
         groups[name] = ifaces
+
+    if not groups and not args.iface:
+        groups = _default_groups()
 
     fixed = args.max * (1 << 20) if args.max else None
     floor = 128 * 1024  # don't let the auto-scale zoom in below 128 KB/s
