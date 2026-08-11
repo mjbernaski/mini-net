@@ -86,7 +86,7 @@ def summarize(samples, group_order):
                 f"{label} down {human_total(d_rx)} (avg {human(d_rx / span).strip()}, peak {human(peak_rx).strip()}) "
                 f"up {human_total(d_tx)} (avg {human(d_tx / span).strip()}, peak {human(peak_tx).strip()})"
             )
-        body = " | ".join(parts)
+        body = "\n".join(parts)
 
     text = f"net {mins:.1f}m: {body} | {len(samples)} samples @ {stamp}"
     return text[:MAX_NOTE]
