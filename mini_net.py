@@ -58,14 +58,29 @@ def _read_bsd():
             continue
 
 
+def _read_raw():
+    return _read_linux() if LINUX else _read_bsd()
+
+
 def read_counters(iface=None):
     """Return (rx_bytes, tx_bytes) summed over physical interfaces."""
     rx = tx = 0
-    for name, r, t in (_read_linux() if LINUX else _read_bsd()):
+    for name, r, t in _read_raw():
         if _keep(name, iface):
             rx += r
             tx += t
     return rx, tx
+
+
+def read_grouped_counters(groups):
+    """groups: {label: [exact iface names]}. Returns {label: (rx_bytes, tx_bytes)}."""
+    totals = {label: [0, 0] for label in groups}
+    for name, r, t in _read_raw():
+        for label, ifaces in groups.items():
+            if name in ifaces:
+                totals[label][0] += r
+                totals[label][1] += t
+    return {label: (rx, tx) for label, (rx, tx) in totals.items()}
 
 
 def human(bps):
@@ -117,7 +132,21 @@ def main():
     p.add_argument("-n", "--iface", help="limit to one interface, e.g. en0")
     p.add_argument("-m", "--max", type=float, metavar="MBPS",
                    help="fixed bar scale in MB/s (default: auto)")
+    p.add_argument("-g", "--group", action="append", default=[],
+                   metavar="NAME=IFACE[,IFACE...]",
+                   help="named interface group rendered as its own bar "
+                        "(repeatable); e.g. -g eth=enP7s7 "
+                        "-g hb=enp1s0f0np0,enp1s0f1np1. Overrides --iface.")
     args = p.parse_args()
+
+    groups = {}
+    for spec in args.group:
+        name, sep, ifaces = spec.partition("=")
+        ifaces = [x.strip() for x in ifaces.split(",") if x.strip()]
+        if not sep or not name or not ifaces:
+            sys.exit(f"mini-net: bad --group spec {spec!r}, "
+                      "expected NAME=IFACE[,IFACE...]")
+        groups[name] = ifaces
 
     fixed = args.max * (1 << 20) if args.max else None
     floor = 128 * 1024  # don't let the auto-scale zoom in below 128 KB/s
@@ -132,38 +161,53 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
+    def sample():
+        if groups:
+            return read_grouped_counters(groups)
+        return {"": read_counters(args.iface)}
+
     try:
-        prev = read_counters(args.iface)
+        prev = sample()
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         sys.stdout.write("\033[?25h")
         sys.exit(f"mini-net: cannot read interface counters: {e}")
     prev_t = time.monotonic()
-    peak = 0.0
-    decaying = floor
+    peaks = {label: 0.0 for label in prev}
+    decaying = {label: floor for label in prev}
+    label_w = max((len(label) for label in prev), default=0)
+    first = True
 
     while True:
         time.sleep(args.interval)
         now = time.monotonic()
-        cur = read_counters(args.iface)
+        cur = sample()
         dt = now - prev_t or args.interval
+        cols = shutil.get_terminal_size((80, 24)).columns
 
-        # counters are cumulative and can reset; clamp negatives to 0
-        rx_rate = max(0, cur[0] - prev[0]) / dt
-        tx_rate = max(0, cur[1] - prev[1]) / dt
+        lines = []
+        for label in prev:
+            # counters are cumulative and can reset; clamp negatives to 0
+            rx_rate = max(0, cur[label][0] - prev[label][0]) / dt
+            tx_rate = max(0, cur[label][1] - prev[label][1]) / dt
+            total = rx_rate + tx_rate
+            peaks[label] = max(peaks[label], total)
+
+            if fixed:
+                scale = fixed
+            else:
+                decaying[label] = max(total, decaying[label] * 0.96, floor)
+                scale = nice_scale(decaying[label])
+
+            prefix = f"{label:>{label_w}} " if label_w else ""
+            width = max(10, cols - 52 - len(prefix))
+            lines.append(prefix + render(rx_rate, tx_rate, scale, width, peaks[label]))
         prev, prev_t = cur, now
 
-        total = rx_rate + tx_rate
-        peak = max(peak, total)
-
-        if fixed:
-            scale = fixed
-        else:
-            decaying = max(total, decaying * 0.96, floor)
-            scale = nice_scale(decaying)
-
-        cols = shutil.get_terminal_size((80, 24)).columns
-        width = max(10, cols - 52)
-        sys.stdout.write("\r\033[K" + render(rx_rate, tx_rate, scale, width, peak))
+        if not first:
+            sys.stdout.write(f"\033[{len(lines)}A")
+        first = False
+        for line in lines:
+            sys.stdout.write("\r\033[K" + line + "\n")
         sys.stdout.flush()
 
 
