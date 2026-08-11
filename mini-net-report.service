@@ -1,0 +1,12 @@
+[Unit]
+Description=mini-net rolling network usage reporter
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/bin/mini_net_report.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

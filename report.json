@@ -1,0 +1,8 @@
+{
+  "_comment": "Config for mini_net_report.py. Change 'url' if the status service moves.",
+  "url": "http://localhost:9999/note",
+  "sample_interval_sec": 15,
+  "post_interval_sec": 60,
+  "window_sec": 300,
+  "iface": null
+}

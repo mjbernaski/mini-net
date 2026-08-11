@@ -7,11 +7,13 @@
     },
     {
       "name": "spark-1",
-      "ssh": "CHANGE-ME.local"
+      "ssh": "CHANGE-ME.local",
+      "reporter": true
     },
     {
       "name": "spark-2",
-      "ssh": "CHANGE-ME.local"
+      "ssh": "CHANGE-ME.local",
+      "reporter": true
     }
   ],
   "install_dir": "~/.local/bin"
