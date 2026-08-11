@@ -4,7 +4,6 @@
 import argparse
 import json
 import os
-import socket
 import sys
 import time
 import urllib.error
@@ -64,7 +63,7 @@ def _group_stats(samples, label):
     return d_rx, d_tx, peak_rx, peak_tx, span
 
 
-def summarize(samples, host, group_order):
+def summarize(samples, group_order):
     """samples: deque of (monotonic_t, {label: (rx, tx)}). Returns note text."""
     span = samples[-1][0] - samples[0][0]
     if span <= 0:
@@ -89,7 +88,7 @@ def summarize(samples, host, group_order):
             )
         body = " | ".join(parts)
 
-    text = f"{host} net {mins:.1f}m: {body} | {len(samples)} samples @ {stamp}"
+    text = f"net {mins:.1f}m: {body} | {len(samples)} samples @ {stamp}"
     return text[:MAX_NOTE]
 
 
@@ -111,7 +110,6 @@ def main():
     args = p.parse_args()
 
     cfg = load_config(args.config)
-    host = socket.gethostname()
     window = cfg["window_sec"]
     sample_every = cfg["sample_interval_sec"]
     post_every = cfg["post_interval_sec"]
@@ -136,7 +134,7 @@ def main():
 
         ready = len(samples) >= 2 and (args.once or now - last_post >= post_every)
         if ready:
-            text = summarize(samples, host, group_order)
+            text = summarize(samples, group_order)
             if text:
                 try:
                     post(cfg["url"], text)
