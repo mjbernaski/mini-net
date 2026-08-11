@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy to hosts.json and set 'ssh' to each machine's ssh target (hostname or ~/.ssh/config alias).",
+  "hosts": [
+    {
+      "name": "intel-server",
+      "ssh": "CHANGE-ME.local"
+    },
+    {
+      "name": "spark-1",
+      "ssh": "CHANGE-ME.local"
+    },
+    {
+      "name": "spark-2",
+      "ssh": "CHANGE-ME.local"
+    }
+  ],
+  "install_dir": "~/.local/bin"
+}

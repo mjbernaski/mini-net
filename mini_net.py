@@ -8,6 +8,13 @@ import subprocess
 import sys
 import time
 
+LINUX = sys.platform.startswith("linux")
+
+# Virtual interfaces: skipping these keeps VPN/container traffic from
+# double-counting the physical link it rides on.
+SKIP = ("lo", "gif", "stf", "utun", "awdl", "llw", "bridge",
+        "docker", "veth", "br-", "virbr", "tun", "tap", "wg", "tailscale")
+
 RESET = "\033[0m"
 DOWN = "\033[38;5;44m"   # cyan
 UP = "\033[38;5;170m"    # magenta
@@ -17,28 +24,47 @@ BLOCK = "█"
 EMPTY = "─"
 
 
-def read_counters(iface=None):
-    """Return (rx_bytes, tx_bytes) summed over physical interfaces."""
+def _keep(name, iface):
+    if iface:
+        return name == iface
+    return not name.startswith(SKIP)
+
+
+def _read_linux():
+    with open("/proc/net/dev") as fh:
+        rows = fh.read().splitlines()[2:]  # two header lines
+    for line in rows:
+        name, sep, rest = line.partition(":")
+        f = rest.split()
+        if not sep or len(f) < 9:
+            continue
+        try:
+            yield name.strip(), int(f[0]), int(f[8])
+        except ValueError:
+            continue
+
+
+def _read_bsd():
     out = subprocess.run(
         ["netstat", "-ib"], capture_output=True, text=True, check=True
     ).stdout
-
-    rx = tx = 0
     for line in out.splitlines()[1:]:
         f = line.split()
         if len(f) < 10 or "<Link" not in f[2]:
             continue  # one row per address; the <Link#n> row is canonical
-        name = f[0]
-        if iface:
-            if name != iface:
-                continue
-        elif name.startswith(("lo", "gif", "stf", "utun", "awdl", "llw", "bridge")):
-            continue
         try:
-            rx += int(f[6])
-            tx += int(f[9])
+            yield f[0], int(f[6]), int(f[9])
         except ValueError:
             continue
+
+
+def read_counters(iface=None):
+    """Return (rx_bytes, tx_bytes) summed over physical interfaces."""
+    rx = tx = 0
+    for name, r, t in (_read_linux() if LINUX else _read_bsd()):
+        if _keep(name, iface):
+            rx += r
+            tx += t
     return rx, tx
 
 

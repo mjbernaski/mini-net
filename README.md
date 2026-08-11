@@ -1,6 +1,6 @@
 # mini-net
 
-Live network throughput on a single CLI progress bar. macOS, stdlib-only Python, no dependencies.
+Live network throughput on a single CLI progress bar. macOS and Linux, stdlib-only Python, no dependencies.
 
 ```
 ↓  48.7 MB/s  ▕██████████████──────────────▏  ↑  80.4 KB/s  peak 48.7 MB/s
@@ -28,12 +28,23 @@ ln -sf "$PWD/mini-net.sh" ~/.local/bin/mini-net
 
 The launcher resolves symlinks to find its own directory, so it works from any working directory.
 
+## Installing on other machines
+
+Copy `hosts.example.json` to `hosts.json`, set each `ssh` field to a hostname or `~/.ssh/config` alias, then:
+
+```bash
+./install-remote.sh            # every host in hosts.json
+./install-remote.sh spark-1    # just one, by name
+```
+
+It copies both files over SSH, symlinks `mini-net` into `install_dir`, runs a smoke test, and warns if that directory isn't on the remote `PATH`. `hosts.json` is gitignored so your internal addresses stay out of the repo.
+
 ## How it works
 
-Polls the cumulative byte counters from `netstat -ib` and diffs them against wall time.
+Polls cumulative interface byte counters and diffs them against wall time — `/proc/net/dev` on Linux, `netstat -ib` on macOS and BSD.
 
 - **Auto-scale** decays 4% per tick with a 128 KB/s floor and snaps to 1/2/5×10ⁿ, so the axis doesn't jitter frame to frame. A burst widens the scale instantly, then it drifts back down.
-- **Interfaces** — `lo`, `gif`, `stf`, `utun`, `awdl`, `llw`, and `bridge` are excluded by default so VPN tunnels and AirDrop don't double-count physical traffic.
+- **Interfaces** — virtual ones (`lo`, `utun`, `awdl`, `bridge`, `docker`, `veth`, `wg`, `tailscale`, …) are excluded by default so VPN tunnels and container bridges don't double-count the physical link they ride on.
 - Bar width tracks terminal width; the cursor is hidden during the run and restored on Ctrl-C or SIGTERM.
 
 Counter resets are clamped to zero rather than producing a negative spike.
