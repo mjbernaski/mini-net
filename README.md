@@ -39,13 +39,17 @@ Copy `hosts.example.json` to `hosts.json`, set each `ssh` field to a hostname or
 
 It copies both files over SSH, symlinks `mini-net` into `install_dir`, runs a smoke test, and warns if that directory isn't on the remote `PATH`. `hosts.json` is gitignored so your internal addresses stay out of the repo.
 
-## Reporting to a status service (Linux)
+## Reporting to a status service
 
-`mini_net_report.py` is a headless daemon — no terminal, no bar — that samples counters into a rolling window and POSTs a summary to the [mini-status-service](#) note API:
+`mini_net_report.py` is a headless daemon — no terminal, no bar — that samples counters into a rolling window and POSTs a summary to the [mini-status-service](#) note API. It reports **volume moved**, not rates:
 
 ```
-spark-1 net 5.0m: down 1.2 GB (avg 4.1 MB/s, peak 51.3 MB/s) | up 12.3 MB (avg 42.0 KB/s, peak 811.0 KB/s) | 21 samples @ 10:27:48 CDT
+eth ↓ 574.2 KB  ↑ 85.3 KB
+hb ↓ 40.1 KB  ↑ 23.9 KB
+last 5m @ 10:43
 ```
+
+One line per group, then the window and timestamp. Each host posts to its own note service on `localhost:9999`.
 
 Settings live in `report.json`:
 
@@ -53,11 +57,16 @@ Settings live in `report.json`:
 |---|---|---|
 | `url` | `http://localhost:9999/note` | where to POST `{"text": ...}` |
 | `sample_interval_sec` | 15 | how often counters are read |
-| `post_interval_sec` | 60 | how often a note is posted |
+| `post_interval_sec` | 60 | how often a note is posted (floored at 60) |
 | `window_sec` | 300 | rolling window the summary covers |
 | `iface` | `null` | limit to one interface |
+| `groups` | `null` | named interface groups, one output line each |
 
-Install it as a `systemd --user` service on every host flagged `"reporter": true` in `hosts.json`:
+`groups` is a single fleet-wide map — a group naming interfaces the current host doesn't have is dropped on that host, so `eth`/`hb` render only on the sparks and `wifi` only on the Mac. The same map backs `mini-net -g`, so the live bar and the notes agree without a second config.
+
+### Linux
+
+Install as a `systemd --user` service on every host flagged `"reporter": true` in `hosts.json`:
 
 ```bash
 ./install-reporter.sh              # all reporter hosts
@@ -66,7 +75,21 @@ systemctl --user status mini-net-report      # on the host
 journalctl --user -u mini-net-report -f
 ```
 
-The user service needs no root. It requires lingering (`loginctl enable-linger $USER`) so it starts at boot without a login session. Notes are capped at the server's 500-char limit; posting failures are logged to the journal and retried on the next cycle rather than killing the daemon.
+The user service needs no root. It requires lingering (`loginctl enable-linger $USER`) so it starts at boot without a login session. Re-running the installer restarts the service, so a redeploy takes effect immediately.
+
+### macOS
+
+macOS has no systemd, so the Mac uses a launchd user agent instead:
+
+```bash
+./install-mac.sh
+launchctl print gui/$(id -u)/com.mjbernaski.mini-net-report
+tail -f ~/Library/Logs/mini-net-report.log
+```
+
+It creates `.venv` if missing and writes the plist with absolute paths, since launchd has no `%h` equivalent.
+
+Notes are capped at the server's 500-char limit; posting failures are logged and retried on the next cycle rather than killing the daemon.
 
 ## How it works
 

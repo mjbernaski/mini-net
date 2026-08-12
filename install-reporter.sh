@@ -29,7 +29,8 @@ echo "$targets" | while read -r name target dir; do
     ssh "$target" '
         chmod +x ~/.local/bin/mini_net_report.py
         systemctl --user daemon-reload
-        systemctl --user enable --now mini-net-report.service
+        systemctl --user enable mini-net-report.service
+        systemctl --user restart mini-net-report.service  # enable --now is a no-op on redeploy
         sleep 1
         systemctl --user is-active mini-net-report.service
     ' </dev/null

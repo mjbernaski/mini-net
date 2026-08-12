@@ -1,8 +1,13 @@
 {
-  "_comment": "Config for mini_net_report.py. Change 'url' if the status service moves.",
+  "_comment": "Shared config for mini_net_report.py. Change 'url' if the status service moves. Groups naming interfaces a host doesn't have are ignored on that host, so one file serves the whole fleet.",
   "url": "http://localhost:9999/note",
   "sample_interval_sec": 15,
   "post_interval_sec": 60,
   "window_sec": 300,
-  "iface": null
+  "iface": null,
+  "groups": {
+    "eth": ["enP7s7"],
+    "hb": ["enp1s0f0np0", "enp1s0f1np1"],
+    "wifi": ["en0"]
+  }
 }

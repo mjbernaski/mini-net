@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Post a rolling network-usage summary to the mini-status-service note API."""
+"""Post per-link data transferred to the mini-status-service note API."""
 
 import argparse
 import json
 import os
-import socket
 import sys
 import time
 import urllib.error
@@ -12,16 +11,17 @@ import urllib.request
 from collections import deque
 from datetime import datetime
 
-from mini_net import human, read_counters
+from mini_net import present_groups, read_counters, read_grouped_counters
 
 MAX_NOTE = 500  # server rejects longer
 
 DEFAULTS = {
     "url": "http://localhost:9999/note",
     "sample_interval_sec": 15,
-    "post_interval_sec": 60,
+    "post_interval_sec": 60,  # the server keeps every note in memory; don't post faster
     "window_sec": 300,
     "iface": None,
+    "groups": None,  # e.g. {"eth": ["enP7s7"], "hb": ["enp1s0f0np0", "enp1s0f1np1"]}
 }
 
 
@@ -40,32 +40,28 @@ def human_total(n):
     return f"{n:.0f} B"
 
 
-def summarize(samples, host):
-    """samples: deque of (monotonic_t, rx, tx). Returns note text."""
-    (t0, rx0, tx0), (t1, rx1, tx1) = samples[0], samples[-1]
-    span = t1 - t0
+def transferred(samples, label):
+    """Bytes moved over `label` across the whole window."""
+    rx0, tx0 = samples[0][1][label]
+    rx1, tx1 = samples[-1][1][label]
+    return max(0, rx1 - rx0), max(0, tx1 - tx0)
+
+
+def summarize(samples, group_order):
+    """samples: deque of (monotonic_t, {label: (rx, tx)}). Returns note text."""
+    span = samples[-1][0] - samples[0][0]
     if span <= 0:
         return None
 
-    d_rx, d_tx = max(0, rx1 - rx0), max(0, tx1 - tx0)
+    parts = []
+    for label in group_order:
+        d_rx, d_tx = transferred(samples, label)
+        name = f"{label} " if label else ""
+        parts.append(f"{name}↓ {human_total(d_rx)}  ↑ {human_total(d_tx)}")
 
-    peak_rx = peak_tx = 0.0
-    for (ta, ra, ta_tx), (tb, rb, tb_tx) in zip(samples, list(samples)[1:]):
-        dt = tb - ta
-        if dt <= 0:
-            continue
-        peak_rx = max(peak_rx, max(0, rb - ra) / dt)
-        peak_tx = max(peak_tx, max(0, tb_tx - ta_tx) / dt)
-
-    mins = span / 60
-    stamp = datetime.now().astimezone().strftime("%H:%M:%S %Z")
-    text = (
-        f"{host} net {mins:.1f}m: "
-        f"down {human_total(d_rx)} (avg {human(d_rx / span).strip()}, peak {human(peak_rx).strip()}) | "
-        f"up {human_total(d_tx)} (avg {human(d_tx / span).strip()}, peak {human(peak_tx).strip()}) | "
-        f"{len(samples)} samples @ {stamp}"
-    )
-    return text[:MAX_NOTE]
+    stamp = datetime.now().astimezone().strftime("%H:%M")
+    parts.append(f"last {span / 60:.0f}m @ {stamp}")
+    return "\n".join(parts)[:MAX_NOTE]
 
 
 def post(url, text, timeout=10):
@@ -86,10 +82,11 @@ def main():
     args = p.parse_args()
 
     cfg = load_config(args.config)
-    host = socket.gethostname()
     window = cfg["window_sec"]
     sample_every = cfg["sample_interval_sec"]
-    post_every = cfg["post_interval_sec"]
+    post_every = max(60, cfg["post_interval_sec"])  # never faster than once a minute
+    groups = present_groups(cfg.get("groups"))
+    group_order = list(groups) if groups else [""]
 
     samples = deque()
     last_post = 0.0
@@ -97,19 +94,18 @@ def main():
     while True:
         now = time.monotonic()
         try:
-            rx, tx = read_counters(cfg["iface"])
-        except Exception as e:  # transient /proc read failure shouldn't kill the daemon
+            data = read_grouped_counters(groups) if groups else {"": read_counters(cfg["iface"])}
+        except Exception as e:  # a transient counter read failure shouldn't kill the daemon
             print(f"sample failed: {e}", file=sys.stderr, flush=True)
             time.sleep(sample_every)
             continue
 
-        samples.append((now, rx, tx))
+        samples.append((now, data))
         while len(samples) > 2 and now - samples[0][0] > window:
             samples.popleft()
 
-        ready = len(samples) >= 2 and (args.once or now - last_post >= post_every)
-        if ready:
-            text = summarize(samples, host)
+        if len(samples) >= 2 and (args.once or now - last_post >= post_every):
+            text = summarize(samples, group_order)
             if text:
                 try:
                     post(cfg["url"], text)
